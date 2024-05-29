@@ -1,0 +1,66 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+
+# Login to the website to get the token
+login_url = 'https://quotes.toscrape.com/login'
+login_data = {
+    'username': 'test',
+    'password': 'test'
+}
+
+session = requests.Session()
+response = session.get(login_url)
+soup = BeautifulSoup(response.text, 'html.parser')
+csrf_token = soup.find('input', {'name': 'csrf_token'})['value']
+
+login_data['csrf_token'] = csrf_token
+login_response = session.post(login_url, data=login_data)
+
+# Extract the token from the response
+token = login_response.cookies.get('session')
+
+# Function to scrape quotes from a single page
+def scrape_quotes(page_url):
+    response = session.get(page_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    quotes = []
+    for quote in soup.find_all('div', class_='quote'):
+        text = quote.find('span', class_='text').get_text()
+        author = quote.find('small', class_='author').get_text()
+        tags = [tag.get_text() for tag in quote.find_all('a', class_='tag')]
+        quotes.append({'text': text, 'author': author, 'tags': tags})
+    return quotes
+
+# Scrape the first 5 pages
+base_url = 'https://quotes.toscrape.com/page/'
+all_quotes = []
+for i in range(1, 6):
+    all_quotes.extend(scrape_quotes(base_url + str(i)))
+
+# Filter quotes by the first 4 tags
+first_four_tags = set()
+for quote in all_quotes:
+    first_four_tags.update(quote['tags'])
+    if len(first_four_tags) >= 4:
+        break
+first_four_tags = list(first_four_tags)[:4]
+
+filtered_quotes = [q for q in all_quotes if any(tag in first_four_tags for tag in q['tags'])]
+
+# Add quotes from the first 2 pages with the tag "books"
+books_quotes = []
+books_tag_url = 'https://quotes.toscrape.com/tag/books/page/'
+for i in range(1, 3):
+    books_quotes.extend(scrape_quotes(books_tag_url + str(i)))
+
+# Combine and remove duplicates
+all_filtered_quotes = filtered_quotes + books_quotes
+unique_quotes = {q['text']: q for q in all_filtered_quotes}.values()
+
+# Convert to DataFrame and save to CSV
+df = pd.DataFrame(unique_quotes)
+df['token'] = token
+df.to_csv('results.csv', index=False)
+
+print("Scraping and filtering completed. Results saved to results.csv.")
